@@ -121,6 +121,37 @@ def _holds_text(X: Any) -> bool:
     )
 
 
+def _holds_words(y: Any) -> bool:
+    """Whether y holds text that doesn't read as numbers, as `"1.5"` does."""
+    if not _holds_text(y):
+        return False
+    try:
+        np.asarray(y, dtype=np.float64)
+    except (TypeError, ValueError):
+        return True
+    return False
+
+
+def _labels(y: Any) -> Any:
+    """Labels with byte strings read as UTF-8 text, as sklearn takes no bytes labels."""
+    array = np.asarray(y)
+    if array.dtype.kind != "S" and not (
+        array.dtype.kind == "O"
+        and any(isinstance(value, bytes) for value in array.ravel())
+    ):
+        return y
+    try:
+        return np.array(
+            [
+                value.decode() if isinstance(value, bytes) else value
+                for value in array.ravel()
+            ],
+            dtype=object,
+        ).reshape(array.shape)
+    except UnicodeDecodeError:
+        raise ValueError("y holds bytes that are not UTF-8 text") from None
+
+
 def _validated(estimator: BaseEstimator, X: Any, *args: Any, **options: Any) -> Any:
     """Unnamed rows validated as sklearn does, as float32, which holds no text."""
     try:
@@ -413,7 +444,8 @@ class Classifier(ClassifierMixin, _Estimator):
 
         Args:
             X: Rows, with NaN for missing values.
-            y: Any labels; `classes_` keeps them in sorted order.
+            y: Any labels, with byte strings read as UTF-8 text; `classes_` keeps
+                them in sorted order.
 
         Returns:
             The fitted estimator.
@@ -425,6 +457,7 @@ class Classifier(ClassifierMixin, _Estimator):
             rows, y = self._typed_rows(X, y)
         else:
             rows, y = _validated(self, X, y)
+        y = _labels(y)
         if type_of_target(y) not in ("binary", "multiclass"):
             raise ValueError(f"Unknown label type: {type_of_target(y)}")
         self.classes_, codes = np.unique(np.asarray(y), return_inverse=True)
@@ -486,6 +519,10 @@ class Classifier(ClassifierMixin, _Estimator):
         probabilities = self.predict_proba(X)
         return self.classes_[probabilities.argmax(axis=1)]
 
+    def score(self, X: Any, y: Any, sample_weight: Any = None) -> float:
+        """Mean accuracy on the labeled rows, as sklearn scores, with byte labels as text."""
+        return super().score(X, _labels(y), sample_weight)
+
 
 class Regressor(RegressorMixin, _Estimator):
     """Predicts values in context of the rows it was fit on.
@@ -528,6 +565,11 @@ class Regressor(RegressorMixin, _Estimator):
             The fitted estimator.
         """
         self.close()
+        if _holds_words(y):
+            raise ValueError(
+                "y holds text, but a Regressor predicts numbers; use a Classifier "
+                "to predict labels"
+            )
         original_y = y
         self._kinds = None
         if _named(X):

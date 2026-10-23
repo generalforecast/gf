@@ -44,6 +44,7 @@ from generalforecast.constants import (
     MEASURED_ROWS,
     SCATTER_ROWS,
     SCATTER_THREADS,
+    STACK_CHUNK,
     TABLE_STAGES,
     WARM_RUN_ROWS,
     WARMED_PAGES,
@@ -3003,16 +3004,38 @@ def _stacked(items: Sequence[Any]) -> Any:
     ]
     on_device = [index for index, host in enumerate(on_host) if not host]
     if on_device:
-        stacked = _stack_columns([columns[index] for index in on_device])
+        stacked = _stacked_on_device([columns[index] for index in on_device])
         for index, values in zip(on_device, stacked, strict=True):
             leaves[index] = values
     return jax.tree.unflatten(structures[0], leaves)
+
+
+def _stacked_on_device(columns: list[tuple]) -> list[jax.Array]:
+    """Each column's device values stacked on a new first axis.
+
+    Past `STACK_CHUNK` items the columns stack a chunk at a time and one
+    program joins the chunks, so no count compiles a stack of thousands.
+    """
+    count = len(columns[0])
+    if count <= STACK_CHUNK:
+        return _stack_columns(columns)
+    chunks = [
+        _stack_columns([column[start : start + STACK_CHUNK] for column in columns])
+        for start in range(0, count, STACK_CHUNK)
+    ]
+    return _join_columns([list(parts) for parts in zip(*chunks, strict=True)])
 
 
 @jax.jit
 def _stack_columns(columns: list[tuple]) -> list[jax.Array]:
     """Each column's values stacked on a new first axis, in one dispatch."""
     return [jnp.stack(column) for column in columns]
+
+
+@jax.jit
+def _join_columns(columns: list[list[jax.Array]]) -> list[jax.Array]:
+    """Each column's stacked chunks joined on their first axis, in one dispatch."""
+    return [jnp.concatenate(parts) for parts in columns]
 
 
 @jax.jit

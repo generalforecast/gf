@@ -1,7 +1,7 @@
 [package]
 name = "gf-router"
 description = "generalforecast's router: places tables on nodes and forwards clients to them"
-version = "0.1.6"
+version = "0.1.7"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -23,6 +23,10 @@ SCATTER_ROWS = 4096
 # scatter's share of a step barely shrinks and workers sharing a host's cores
 # would contend for them.
 SCATTER_THREADS = 8
+# Items a device stack takes in one program. A stack's compile grows faster
+# than its items, about 14 s at 2,048 on a CPU, so a larger stack joins
+# stacks of this many, which compile in a tenth of that and run as fast.
+STACK_CHUNK = 64
 
 # --- Memory measurement ---
 
